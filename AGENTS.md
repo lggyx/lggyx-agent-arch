@@ -13,6 +13,8 @@
 
 它是**机制**，不是**内容**：不放任何具体技能，只放让用户搭建和整理自己架构的工具与规则。
 
+**如果用户是复制 [PROMPT.md](PROMPT.md) 里的 prompt 来找你的**，那段 prompt 已经把流程、边界、硬约束都写清楚了。按其执行，并遵守本文件的所有铁律。
+
 ---
 
 ## 铁律
@@ -100,6 +102,7 @@ scripts/     扫描、分类、迁移、引导工具
 hooks/       远程更新检测脚本
 tests/       单元测试
 docs/        架构蓝图
+PROMPT.md    给用户的 prompt 入口（复制即用）
 README.md    人类文档
 AGENTS.md    本文件
 LICENSE      MIT

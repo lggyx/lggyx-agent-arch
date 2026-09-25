@@ -1,9 +1,15 @@
 # lggyx-agent-arch
 
-多 Agent 技能治理架构。给「已经装了一堆 skill，不知道该怎么管」的人用。
+多 Agent 技能治理架构。给 Agent 一套**可复刻的技能治理机制**。
 
 它不做的事：教你写 skill、给你一套开箱即用的技能包。
 它做的事：**把你本机散落各处的 skill 盘点清楚、分清归属、归一成单一真源，并让这份真源跨设备同步。**
+
+---
+
+## 怎么用
+
+**你不用记任何命令。** 复制 README 里那段 prompt，发给你的 Agent，它会带着你走完。
 
 ---
 
@@ -31,52 +37,68 @@
 
 ## 快速开始
 
+**复制 [PROMPT.md](PROMPT.md) 里那段话，发给你的 Agent。** 就这些。
+
+简短版（完整版见 [PROMPT.md](PROMPT.md)）：
+
+```text
+帮我把本机的 skill 治理一下。
+
+1. 先运行 `git clone https://github.com/lggyx/lggyx-agent-arch.git ~/agent-arch`
+2. 读 ~/agent-arch/README.md 和 AGENTS.md，按「三步流程」带我走一遍
+3. 第一步跑 `python3 ~/agent-arch/scripts/scan.py -o ~/agent-arch/inventory.json`，
+   把盘点结果讲给我听：本机有哪些 skill、有没有重名的、哪些缺 SKILL.md
+4. 第二步跑 `python3 ~/agent-arch/scripts/classify.py` 生成分类清单，
+   然后**逐项问我归属**（个人原创 / 第三方 / 官方自带），
+   不要替我做决定，也不要擅自动文件
+5. 我确认完之后，先跑 dry-run 给我看，我说"执行"你才能加 --apply
+6. 过程中凡是涉及删除、移动、覆盖的操作，一律先问我
+```
+
+Agent 会自己读文档、跑脚本、把结果解释给你听。
+
+**两个关键点**：
+
+- 这个工具**会移动你的文件**，所以第 5、6 条是硬约束。你的 Agent 应该遵守——如果不遵守，换个 Agent。
+- 想要的是"从零建一套架构"而不是"整理现有的"？PROMPT.md 里另有对应的一段。
+
+---
+
+## 命令行用法（进阶）
+
+想自己控制每一步，或者写进 CI：
+
 ```bash
 git clone https://github.com/lggyx/lggyx-agent-arch.git
 cd lggyx-agent-arch
 
-# 0. 第一次用：交互式搭建架构骨架（每步都可跳过）
-python3 scripts/bootstrap.py
-
-# 1. 盘点：本机有哪些 skill（只读，不改任何文件）
-python3 scripts/scan.py -o inventory.json
-
-# 2. 预分类：启发式判断归属，生成待确认清单（仍不改文件）
+python3 scripts/bootstrap.py            # 交互式搭建架构骨架
+python3 scripts/scan.py -o inventory.json        # 只读盘点
 python3 scripts/classify.py inventory.json -o review.json
-
-# 3. 人工确认：编辑 review.json，给要处理的项加 "confirmed": true
-
-# 4. 执行：先 dry-run 看清将要发生什么
-python3 scripts/relocate.py review.json --repo ~/skill-repo
-
-# 5. 确认无误后真正执行
-python3 scripts/relocate.py review.json --repo ~/skill-repo --apply
+$EDITOR review.json                     # 给要处理的项加 "confirmed": true
+python3 scripts/relocate.py review.json --repo ~/skill-repo          # dry-run
+python3 scripts/relocate.py review.json --repo ~/skill-repo --apply  # 执行
 ```
 
-第 4 步**不加 `--apply` 绝不改动任何文件**。这是一个会动你文件的工具，默认必须保守。
-
-想先看看整套架构长什么样、暂不搭建：
-
-```bash
-python3 scripts/bootstrap.py --yes     # 全默认值预览，不提问不执行
-```
+`relocate.py` **不加 `--apply` 绝不改动任何文件**。
 
 ---
 
 ## 两个入口
 
-| 你的情况 | 入口 |
-|---|---|
-| 刚接触，想从零建一套 | `bootstrap.py` —— 交互式向导，逐组件搭建骨架 |
-| 已经装了一堆 skill，想管起来 | `scan.py` → `classify.py` → `relocate.py` —— 盘点、分类、归一化 |
-
-两者可以独立使用，但一起用才是完整流程：bootstrap 建骨架，scan 三件套填内容。
+| 你的情况 |  prompt 里怎么说 | 对应脚本 |
+|---|---|---|
+| 刚接触，想从零建一套 | 「用 bootstrap 带我搭一套技能架构」 | `bootstrap.py` |
+| 已经装了一堆 skill，想管起来 | 「按 README 三步流程治理我的 skill」 | `scan` → `classify` → `relocate` |
 
 完整架构蓝图（7 个组件、依赖顺序、最小可用版本）见 [docs/架构蓝图.md](docs/架构蓝图.md)。
 
 ---
 
 ## 三步流程
+
+> 这三步由你的 **Agent** 执行，你负责看结果、做归属决策。
+> 下面写清楚每步在做什么、为什么——既给你看懂，也给 Agent 读。
 
 ### 第一步：扫描（scan.py）
 
@@ -220,7 +242,7 @@ skills:
 python3 -m unittest discover -s tests -v
 ```
 
-19 个用例，全部在临时目录里造 fixture，**不碰 `~/.hermes`、`~/skill-repo` 等真实位置**。
+28 个用例，全部在临时目录里造 fixture，**不碰 `~/.hermes`、`~/skill-repo` 等真实位置**。
 
 测试重点不是「能迁移」，而是「什么情况下拒绝迁移」：
 
@@ -230,6 +252,8 @@ python3 -m unittest discover -s tests -v
 - 软链失败必须回滚
 - 私有仓库地址不能当上游来源写入
 - 路径段匹配不能被子串误伤（`/tmp/agent-arch-test-xxx/` 不该被当成用户仓库）
+- dry-run 下所有组件都必须出现在计划里（不能因组件 1 未建成就静默跳过后续）
+- 模板文件不能含编造内容（设备名/日期/资源名都不行）
 
 ---
 
