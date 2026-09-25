@@ -35,6 +35,9 @@
 git clone https://github.com/lggyx/lggyx-agent-arch.git
 cd lggyx-agent-arch
 
+# 0. 第一次用：交互式搭建架构骨架（每步都可跳过）
+python3 scripts/bootstrap.py
+
 # 1. 盘点：本机有哪些 skill（只读，不改任何文件）
 python3 scripts/scan.py -o inventory.json
 
@@ -44,13 +47,32 @@ python3 scripts/classify.py inventory.json -o review.json
 # 3. 人工确认：编辑 review.json，给要处理的项加 "confirmed": true
 
 # 4. 执行：先 dry-run 看清将要发生什么
-python3 scripts/relocate.py review.json --repo ~/shared-brain
+python3 scripts/relocate.py review.json --repo ~/skill-repo
 
 # 5. 确认无误后真正执行
-python3 scripts/relocate.py review.json --repo ~/shared-brain --apply
+python3 scripts/relocate.py review.json --repo ~/skill-repo --apply
 ```
 
 第 4 步**不加 `--apply` 绝不改动任何文件**。这是一个会动你文件的工具，默认必须保守。
+
+想先看看整套架构长什么样、暂不搭建：
+
+```bash
+python3 scripts/bootstrap.py --yes     # 全默认值预览，不提问不执行
+```
+
+---
+
+## 两个入口
+
+| 你的情况 | 入口 |
+|---|---|
+| 刚接触，想从零建一套 | `bootstrap.py` —— 交互式向导，逐组件搭建骨架 |
+| 已经装了一堆 skill，想管起来 | `scan.py` → `classify.py` → `relocate.py` —— 盘点、分类、归一化 |
+
+两者可以独立使用，但一起用才是完整流程：bootstrap 建骨架，scan 三件套填内容。
+
+完整架构蓝图（7 个组件、依赖顺序、最小可用版本）见 [docs/架构蓝图.md](docs/架构蓝图.md)。
 
 ---
 
@@ -110,16 +132,16 @@ $EDITOR review.json    # 给要处理的项加 "confirmed": true
 然后先 dry-run：
 
 ```bash
-python3 scripts/relocate.py review.json --repo ~/shared-brain
+python3 scripts/relocate.py review.json --repo ~/skill-repo
 ```
 
 输出会长这样：
 
 ```
-【将迁入真源】 /home/you/shared-brain/skills/  (3 个)
+【将迁入真源】 /home/you/skill-repo/skills/  (3 个)
   → my-writer
       /home/you/.hermes/skills/creative/my-writer
-      ⇒ /home/you/shared-brain/skills/my-writer（原位置建软链）
+      ⇒ /home/you/skill-repo/skills/my-writer（原位置建软链）
   ✗ another-skill: 目标已存在（不会覆盖）
 
 【将登记到 registry.yaml】 (2 个，不动内容)
@@ -140,7 +162,7 @@ python3 scripts/relocate.py review.json --repo ~/shared-brain
 ## 归一化之后
 
 ```
-~/shared-brain/            # 你的私有仓库（git）
+~/skill-repo/            # 你的私有仓库（git）
 ├── skills/                # 唯一真源
 │   ├── my-writer/         # 你写的
 │   └── my-charts/
@@ -155,7 +177,7 @@ python3 scripts/relocate.py review.json --repo ~/shared-brain
 # ~/.hermes/config.yaml
 skills:
   external_dirs:
-    - /home/you/shared-brain/skills
+    - /home/you/skill-repo/skills
 ```
 
 之后**所有修改都只发生在真源**，`git commit` 一次，别的设备 `git pull` 就同步了。
@@ -164,7 +186,7 @@ skills:
 
 ## 目录规矩
 
-- `~` 根目录只放**系统级仓库**（本仓库、你的 shared-brain、dotfiles）
+- `~` 根目录只放**系统级仓库**（本仓库、你的 skill-repo、dotfiles）
 - **具体项目进 `~/work/<项目名>/`**，不要往 `~` 根目录堆
 - Agent 运行时状态（`.hermes/`、`.claude/`）不算仓库，各自的配置各自维护
 
@@ -186,7 +208,7 @@ skills:
 
 ### 脱敏：不要把私有地址写进 registry
 
-实测踩到的坑：如果你的 skill 都在一个 git 仓库里（比如整个 shared-brain），`git remote get-url` 对**每个** skill 都会返回同一个地址——那是**你自己的私有仓库**，不是上游来源。
+实测踩到的坑：如果你的 skill 都在一个 git 仓库里（比如你整个技能仓库），`git remote get-url` 对**每个** skill 都会返回同一个地址——那是**你自己的私有仓库**，不是上游来源。
 
 `relocate.py` 的 `sanitize_remote()` 会过滤这种情况：只有 skill 位于仓库根的 `skills/<name>` 下，就判定 remote 是用户自己的仓库，不当上游来源写入。
 
@@ -198,7 +220,7 @@ skills:
 python3 -m unittest discover -s tests -v
 ```
 
-19 个用例，全部在临时目录里造 fixture，**不碰 `~/.hermes`、`~/shared-brain` 等真实位置**。
+19 个用例，全部在临时目录里造 fixture，**不碰 `~/.hermes`、`~/skill-repo` 等真实位置**。
 
 测试重点不是「能迁移」，而是「什么情况下拒绝迁移」：
 

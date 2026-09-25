@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 
 # 默认仓库真源位置，可用 --repo 覆盖
-DEFAULT_REPO = Path.home() / "shared-brain"
+DEFAULT_REPO = Path.home() / "skill-repo"
 REGISTRY_NAME = "registry.yaml"
 
 
@@ -56,7 +56,7 @@ def git_remote_of(path: Path) -> str:
     """取目录所在 git 仓库的 remote 地址（用于来源 URL）。
 
     注意：这个地址可能是**用户自己的私有仓库**（例如整个
-    shared-brain 就是一个 git 仓库，里面的每个 skill 都会返回
+    技能仓库就是一个 git 仓库，里面的每个 skill 都会返回
     同一个仓库地址）。这种值不是"上游来源"，写进 registry.yaml
     会泄露私有仓库地址。
 

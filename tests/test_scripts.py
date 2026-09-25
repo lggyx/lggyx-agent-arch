@@ -6,7 +6,7 @@
 
 测试原则：
   - **不动真实数据** —— 所有用例都在临时目录里造 fixture，
-    绝不碰 ~/.hermes、~/shared-brain 等真实位置。
+    绝不碰 ~/.hermes、~/skill-repo 等真实位置。
   - **验证安全属性** —— 这个工具会改文件，所以测试重点不是
     "能迁移"，而是"什么情况下拒绝迁移"。
 """
@@ -301,8 +301,8 @@ class TestRelocate(unittest.TestCase):
     def test_private_remote_not_written_as_upstream(self) -> None:
         """**脱敏测试**：用户自己的私有仓库地址不能当上游来源。
 
-        实测踩到的坑：shared-brain 里的每个 skill 用
-        `git remote get-url` 都会返回 shared-brain 自己的地址，
+        实测踩到的坑：整仓是一个 git 仓库时，里面的每个 skill 用
+        `git remote get-url` 都会返回同一个（用户私有仓库）地址，
         写进 registry.yaml 就泄露了私有仓库。
         """
         # 没有 git 仓库时 remote 为空，sanitize 也应安全返回空
