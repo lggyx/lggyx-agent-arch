@@ -1,0 +1,62 @@
+# ===== 密钥与敏感信息（绝不提交） =====
+.env
+.env.*
+*.env
+!.env.example
+auth.json
+*_token
+*token*.txt
+credentials.json
+secrets.yaml
+secrets.yml
+
+# ===== 设备特定的本地配置（每台设备各自维护，不入库） =====
+# 代理出口地址各设备不同（本机 / Windows 宿主机 / 网关），
+# 由 scripts/detect-proxy.sh 读取 ~/.config/agent-arch/proxy.conf
+.config/
+.local/
+
+# ===== Agent 运行时状态（各设备本地，不入库） =====
+.hermes/
+.claude/
+.pi/
+.opencode/
+.cursor/
+.codex/
+.gemini/
+
+# ===== 系统与编辑器 =====
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ===== Node =====
+node_modules/
+package-lock.json
+npm-debug.log*
+
+# ===== 扫描与迁移的产物（本机生成，不入库） =====
+# scan.py 的盘点结果、relocate.py 的迁移记录都是设备本地数据，
+# 含用户本机路径与技能清单，提交会泄露隐私
+*.scan.json
+*.plan.json
+migration-log/
+
+# ===== 临时文件 =====
+*.tmp
+*.temp
+*.log
+scratch/
