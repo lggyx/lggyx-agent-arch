@@ -41,6 +41,7 @@ OFFICIAL_PATH_MARKERS = (
     "/.claude/skills/",       # Claude Code 自带
     "/.config/opencode/",     # OpenCode 自带
     "/.cursor/skills/",       # Cursor 自带
+    "/.stepcode/agent/skills/",  # StepCode 自带
 )
 
 # 但 shared-brain 这类"用户自己的仓库"即使放在 agent 目录下也不是 official。

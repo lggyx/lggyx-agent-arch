@@ -260,7 +260,7 @@ python3 -m unittest discover -s tests -v
 ## 兼容性
 
 - Python 3.10+，**无第三方依赖**（纯标准库，不引 PyYAML）
-- 已知 Agent：Hermes、Claude Code、OpenCode、pi、Cursor、Codex、Gemini、Goose
+- 已知 Agent：Hermes、Claude Code、OpenCode、pi、Cursor、Codex、Gemini、Goose、StepCode
 - 未覆盖的 Agent 可在 `scan.py` 的 `AGENTS_SKILL_DIRS` / `AGENT_CONFIG_FILES` 里追加
 
 ---

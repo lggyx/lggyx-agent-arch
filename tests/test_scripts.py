@@ -19,6 +19,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
@@ -326,6 +327,163 @@ class TestRelocate(unittest.TestCase):
         self.assertIsNotNone(path)
         text = path.read_text(encoding="utf-8")
         self.assertIn("someone/forked", text)
+
+
+class TestStepCodeConfig(unittest.TestCase):
+    """StepCode 的 settings.json 是 JSON 格式，external_dirs 的行解析
+    对它一个路径都抓不到——用户真源会被整个漏扫（实测踩到的坑）。
+    这里验证 JSON skills 数组的解析规则。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="agent-arch-test-"))
+        self.settings_dir = self.tmp / ".stepcode" / "agent"
+        self.settings_dir.mkdir(parents=True)
+        self.settings = self.settings_dir / "settings.json"
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_settings(self, obj) -> None:
+        self.settings.write_text(json.dumps(obj), encoding="utf-8")
+
+    def test_json_skills_absolute_paths(self) -> None:
+        """绝对路径直接收录——最常见的写法（~/shared-brain/skills）。"""
+        target = self.tmp / "brain" / "skills"
+        target.mkdir(parents=True)
+        self._write_settings({"skills": [str(target)]})
+        paths = scan_mod._paths_from_json_skills(
+            self.settings.read_text(encoding="utf-8"), self.settings_dir
+        )
+        self.assertEqual(paths, [target])
+
+    def test_relative_path_resolves_against_settings_dir(self) -> None:
+        """相对路径相对配置文件所在目录解析（StepCode 的规则）。"""
+        # 全局配置在 ~/.stepcode/agent/settings.json，相对路径
+        # 相对它所在的 agent/ 目录解析，不是相对 ~/.stepcode/
+        target = self.settings_dir / "my-skills"
+        target.mkdir(parents=True)
+        self._write_settings({"skills": ["my-skills"]})
+        paths = scan_mod._paths_from_json_skills(
+            self.settings.read_text(encoding="utf-8"), self.settings_dir
+        )
+        self.assertEqual(paths, [target])
+
+    def test_tilde_expansion(self) -> None:
+        """~ 要展开成 HOME，不能当成普通相对路径。"""
+        home = self.tmp / "fakehome"
+        (home / "brain" / "skills").mkdir(parents=True)
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            paths = scan_mod.normalize_skill_entries(
+                ["~/brain/skills"], self.settings_dir
+            )
+        self.assertEqual(paths, [home / "brain" / "skills"])
+
+    def test_glob_and_exclusion(self) -> None:
+        """glob 展开 + `!pattern` 排除：包含全部再排除一个的写法
+        不能把排除项也扫进去。"""
+        root = self.tmp / "glob"
+        for name in ("a-skills", "b-skills", "secret-skills"):
+            (root / name).mkdir(parents=True)
+        paths = scan_mod.normalize_skill_entries(
+            [f"{root}/*-skills", f"!{root}/secret-skills"], self.settings_dir
+        )
+        names = sorted(p.name for p in paths)
+        self.assertEqual(names, ["a-skills", "b-skills"])
+
+    def test_plus_prefix_force_include(self) -> None:
+        """`+path` 强制包含前缀要剥掉，不能变成路径的一部分。"""
+        target = self.tmp / "forced"
+        target.mkdir()
+        paths = scan_mod.normalize_skill_entries([f"+{target}"], self.settings_dir)
+        self.assertEqual(paths, [target])
+
+    def test_malformed_json_returns_empty(self) -> None:
+        """配置写坏了不能让扫描崩——扫描的定位是只读摸底。"""
+        self.settings.write_text("{ 这不是 json", encoding="utf-8")
+        paths = scan_mod._paths_from_json_skills(
+            self.settings.read_text(encoding="utf-8"), self.settings_dir
+        )
+        self.assertEqual(paths, [])
+
+    def test_missing_or_wrong_type_skills_key(self) -> None:
+        """没有 skills 键、或类型不对 → 空列表，不抛异常。"""
+        for bad in ({}, {"skills": "not-a-list"}, {"skills": [1, None]}):
+            paths = scan_mod._paths_from_json_skills(
+                json.dumps(bad), self.settings_dir
+            )
+            self.assertEqual(paths, [], f"输入 {bad} 应得到空列表")
+
+    def test_read_external_dirs_stepcode(self) -> None:
+        """端到端：read_external_dirs('stepcode') 从 JSON 配置取真源。"""
+        target = self.tmp / "brain" / "skills"
+        target.mkdir(parents=True)
+        self._write_settings({"skills": [str(target)]})
+        with mock.patch.object(
+            scan_mod, "AGENT_CONFIG_FILES",
+            {"stepcode": [str(self.settings)]},
+        ):
+            paths = scan_mod.read_external_dirs("stepcode")
+        self.assertEqual(paths, [target])
+
+    def test_yaml_external_dirs_still_works(self) -> None:
+        """回归：hermes 的 YAML external_dirs 行解析不能被改坏。"""
+        yaml_text = (
+            "skills:\n"
+            "  external_dirs:\n"
+            "    - /home/you/skill-repo/skills\n"
+            "    - /opt/other/skills\n"
+            "theme: dark\n"
+        )
+        paths = scan_mod._paths_from_yaml_external_dirs(yaml_text)
+        self.assertEqual(
+            paths,
+            [Path("/home/you/skill-repo/skills"), Path("/opt/other/skills")],
+        )
+
+    def test_yaml_single_line_form(self) -> None:
+        """`external_dirs: [/a, /b]` 单行形式也要认。"""
+        yaml_text = "external_dirs: [/home/you/a, /home/you/b]\n"
+        paths = scan_mod._paths_from_yaml_external_dirs(yaml_text)
+        self.assertEqual(paths, [Path("/home/you/a"), Path("/home/you/b")])
+
+    def test_collect_dirs_stepcode_kinds(self) -> None:
+        """集成：StepCode 的官方目录标 official_dir，settings 里的
+        标 external（用户真源），两者不能混。"""
+        official = self.tmp / ".stepcode" / "agent" / "skills"
+        make_skill(official, "builtin-skill")
+        external = self.tmp / "brain" / "skills"
+        make_skill(external, "my-skill")
+        self._write_settings({"skills": [str(external)]})
+
+        with mock.patch.object(
+            scan_mod, "AGENTS_SKILL_DIRS",
+            {"stepcode": [str(official)]},
+        ), mock.patch.object(
+            scan_mod, "AGENT_CONFIG_FILES",
+            {"stepcode": [str(self.settings)]},
+        ), mock.patch.object(scan_mod, "EXTRA_SKILL_DIRS", []):
+            dirs = scan_mod.collect_dirs()
+
+        by_base = {str(p): k for _a, p, k in dirs}
+        self.assertEqual(by_base[str(official)], "official_dir")
+        self.assertEqual(by_base[str(external)], "external")
+
+    def test_stepcode_official_path_marker(self) -> None:
+        """classify 兜底：路径在 .stepcode/agent/skills/ 下判 official。"""
+        d = make_skill(self.tmp, "bundled")
+        rec = {"path": str(d), "is_symlink": False, "symlink_target": None,
+               "has_embedded_git": False, "has_skill_md": True,
+               "frontmatter": {"name": "bundled", "license": ""},
+               "source_kind": "other"}
+        # 把路径伪装成位于 stepcode 官方目录下（只测标记匹配）
+        fake = self.tmp / ".stepcode" / "agent" / "skills" / "bundled"
+        fake.mkdir(parents=True)
+        (fake / "SKILL.md").write_text("---\nname: bundled\n---\n")
+        rec["path"] = str(fake)
+        is_off, _ = classify_mod.looks_official(rec)
+        self.assertTrue(is_off)
 
 
 if __name__ == "__main__":

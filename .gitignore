@@ -50,7 +50,12 @@ npm-debug.log*
 
 # ===== 扫描与迁移的产物（本机生成，不入库） =====
 # scan.py 的盘点结果、relocate.py 的迁移记录都是设备本地数据，
-# 含用户本机路径与技能清单，提交会泄露隐私
+# 含用户本机路径与技能清单，提交会泄露隐私。
+# inventory.json / review.json 是 README 与 PROMPT.md 流程里
+# 默认生成的两个文件名——AGENTS.md 声明它们被屏蔽，
+# 漏掉这两行就是文档与行为不一致（实测踩到的坑）。
+inventory.json
+review.json
 *.scan.json
 *.plan.json
 migration-log/

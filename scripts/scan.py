@@ -22,6 +22,8 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import glob
 import hashlib
 import json
 import os
@@ -41,6 +43,8 @@ AGENTS_SKILL_DIRS: dict[str, list[str]] = {
     "codex":    ["~/.codex/skills"],
     "gemini":   ["~/.gemini/skills"],
     "goose":    ["~/.config/goose/skills"],
+    # StepCode：全局技能目录；~/.agents/skills 已由 EXTRA_SKILL_DIRS 覆盖
+    "stepcode": ["~/.stepcode/agent/skills"],
 }
 
 # 额外的通用位置：有些工具不按上面命名，但会把 skill 放这里
@@ -59,15 +63,25 @@ AGENT_CONFIG_FILES: dict[str, list[str]] = {
     "claude": ["~/.claude/config.json", "~/.claude/settings.json"],
     "opencode": ["~/.config/opencode/opencode.json"],
     "codex": ["~/.codex/config.yaml", "~/.codex/config.yml"],
+    "stepcode": ["~/.stepcode/agent/settings.json"],
 }
+
+# ─── 配置格式为 JSON 的 Agent ────────────────────────────
+# 实测踩到的坑：Hermes 等用 YAML 的 skills.external_dirs:，
+# StepCode 的 settings.json 用**根级 skills 数组**——语义相同
+# （被 Agent 加载的 skill 目录 = 用户真源），但格式完全不同。
+# 行解析在 JSON 上一个路径都抓不到，用户的整个真源会被漏扫。
+JSON_SKILLS_AGENTS = {"stepcode"}
 
 
 def read_external_dirs(agent: str) -> list[Path]:
-    """从 Agent 配置里读 skills.external_dirs。
+    """从 Agent 配置里读 skills.external_dirs / skills 数组。
 
-    只做轻量的行解析，不引入 YAML 依赖——external_dirs 是简单的
-    列表结构，逐行抓 `- /path/to/dir` 就够了。找不到配置时返回空列表，
-    不报错（没配 external_dirs 是正常情况）。
+    按 Agent 分两种格式：
+      - YAML（hermes 等）：skills.external_dirs: 列表
+      - JSON（stepcode）：settings.json 的根级 skills 数组
+    找不到配置、解析失败都返回空列表，不报错
+    （没配 external_dirs 是正常情况）。
     """
     paths: list[Path] = []
     for rel in AGENT_CONFIG_FILES.get(agent, []):
@@ -75,35 +89,119 @@ def read_external_dirs(agent: str) -> list[Path]:
         if not cfg.is_file():
             continue
         try:
-            lines = cfg.read_text(encoding="utf-8", errors="replace").splitlines()
+            text = cfg.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
 
-        # 找到 external_dirs: 之后，收集紧随其后的列表项
-        in_block = False
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith("external_dirs"):
-                in_block = True
-                # 可能是 `external_dirs: [/a, /b]` 的单行形式
-                if "[" in stripped:
-                    inner = stripped.split("[", 1)[1].split("]", 1)[0]
-                    for part in inner.split(","):
-                        part = part.strip().strip("'\"")
-                        if part.startswith("/"):
-                            paths.append(Path(part))
+        if agent in JSON_SKILLS_AGENTS:
+            paths.extend(_paths_from_json_skills(text, cfg.parent))
+        else:
+            paths.extend(_paths_from_yaml_external_dirs(text))
+    return paths
+
+
+def _paths_from_yaml_external_dirs(text: str) -> list[Path]:
+    """YAML 配置的 external_dirs 行解析（只认绝对路径）。
+
+    只做轻量的行解析，不引入 YAML 依赖——external_dirs 是简单的
+    列表结构，逐行抓 `- /path/to/dir` 就够了。
+    """
+    paths: list[Path] = []
+    # 找到 external_dirs: 之后，收集紧随其后的列表项
+    in_block = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("external_dirs"):
+            in_block = True
+            # 可能是 `external_dirs: [/a, /b]` 的单行形式
+            if "[" in stripped:
+                inner = stripped.split("[", 1)[1].split("]", 1)[0]
+                for part in inner.split(","):
+                    part = part.strip().strip("'\"")
+                    if part.startswith("/"):
+                        paths.append(Path(part))
+                in_block = False
+            continue
+        if in_block:
+            m = re.match(r"^-\s+(.+?)\s*$", stripped)
+            if m:
+                val = m.group(1).strip().strip("'\"")
+                if val.startswith("/"):
+                    paths.append(Path(val))
+            elif stripped and not stripped.startswith("#"):
+                # 遇到非列表项、非空行，说明列表结束
+                if not stripped.startswith("-"):
                     in_block = False
+    return paths
+
+
+def _paths_from_json_skills(text: str, cfg_dir: Path) -> list[Path]:
+    """JSON 配置（StepCode settings.json）的根级 skills 数组。
+
+    相对路径相对**配置文件所在目录**解析——StepCode 的全局配置
+    在 ~/.stepcode/agent/settings.json，相对它解析。
+    """
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        # 配置写坏了不能让扫描崩——扫描的定位是只读摸底
+        return []
+    if not isinstance(data, dict):
+        return []
+    entries = data.get("skills")
+    if not isinstance(entries, list):
+        return []
+    return normalize_skill_entries(entries, cfg_dir)
+
+
+def normalize_skill_entries(entries: list, cfg_dir: Path) -> list[Path]:
+    """把 skills 数组元素解析成真实路径（StepCode 的路径规则）。
+
+    规则来自 StepCode settings 文档：
+      - 绝对路径与 ~ 直接支持
+      - 相对路径相对配置文件所在目录
+      - 支持 glob；`!pattern` / `-path` 为排除，`+path` 为强制包含
+    排除模式要先生效再做 glob——否则"包含全部再排除一个"
+    的写法会把排除项也扫进去。
+    """
+    includes: list[tuple[str, bool]] = []   # (模式, 是否强制包含)
+    excludes: list[str] = []
+    for raw in entries:
+        if not isinstance(raw, str):
+            continue
+        pat = raw.strip()
+        if not pat:
+            continue
+        if pat.startswith(("!", "-")):
+            excludes.append(pat[1:])
+            continue
+        force = pat.startswith("+")
+        if force:
+            pat = pat[1:]
+        includes.append((pat, force))
+
+    def resolve(pat: str) -> str:
+        expanded = Path(pat).expanduser()
+        if not expanded.is_absolute():
+            expanded = cfg_dir / expanded
+        return str(expanded)
+
+    paths: list[Path] = []
+    for pat, _force in includes:
+        resolved = resolve(pat)
+        if any(ch in resolved for ch in "*?["):
+            paths.extend(Path(m) for m in glob.glob(resolved))
+        else:
+            paths.append(Path(resolved))
+
+    if excludes:
+        ex_patterns = [resolve(ex) for ex in excludes]
+        kept = []
+        for p in paths:
+            if any(fnmatch.fnmatch(str(p), ex) for ex in ex_patterns):
                 continue
-            if in_block:
-                m = re.match(r"^-\s+(.+?)\s*$", stripped)
-                if m:
-                    val = m.group(1).strip().strip("'\"")
-                    if val.startswith("/"):
-                        paths.append(Path(val))
-                elif stripped and not stripped.startswith("#"):
-                    # 遇到非列表项、非空行，说明列表结束
-                    if not stripped.startswith("-"):
-                        in_block = False
+            kept.append(p)
+        paths = kept
     return paths
 
 # frontmatter 字段：name 与 description 是 agentskills.io 规范要求的

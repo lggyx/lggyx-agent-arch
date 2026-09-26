@@ -69,6 +69,8 @@
 | 坑 | 位置 |
 |---|---|
 | Hermes 的 skill 按 `skills/<分类>/<技能>/` 组织，不是平铺的——只扫第一层会漏掉大部分 | `scan.py: iter_skill_dirs()` |
+| StepCode 的配置是 JSON（根级 `skills` 数组），`external_dirs` 的行解析抓不到任何路径——用户的整个真源会被漏扫 | `scan.py: read_external_dirs()` |
+| `inventory.json` / `review.json` 是流程默认产物名，.gitignore 曾漏挡——用户 `git add -A` 就会把全机技能清单推上 public 仓库 | `.gitignore` |
 | Agent 配置里的 `external_dirs` 是真源，最可靠的 personal 信号，但专有授权要压过它 | `classify.py: classify()` |
 | 专有授权（`all rights reserved`）必须优先于 `external_dirs` 判定，否则会把 fork 的专有技能当原创开源 | `classify.py: classify()` |
 | 路径匹配必须按 `/` 切段，不能用子串——`/tmp/agent-arch-test-xxx/` 会被误判成用户仓库 | `classify.py: path_has_segment()` |
